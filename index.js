@@ -17,7 +17,6 @@ const authRoutes          = require('./routes/auth');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-<<<<<<< HEAD
 const allowedOrigins = [
   process.env.CLIENT_URL || 'https://vinaykulkarni.com',
   'http://localhost:5173',
@@ -33,9 +32,6 @@ app.use(cors({
   },
   credentials: true,
 }));
-=======
-app.use(cors({ origin: process.env.CLIENT_URL || 'https://vinaykulkarni.com/' }));
->>>>>>> 90164fc0b7e5f4a820d54de0ed087c96a1b7cc03
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
