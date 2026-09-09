@@ -52,6 +52,11 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
 
+      # Create required directories on server before syncing
+      - name: Create directories on server
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "mkdir -p ${{ secrets.DEPLOY_PATH }}/server && mkdir -p ${{ secrets.DEPLOY_PATH }}/frontend/dist"
+
       # Sync backend source (exclude node_modules, .env, uploads)
       - name: Deploy backend (server/)
         run: |
