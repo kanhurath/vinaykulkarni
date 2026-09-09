@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { getArticles, getCategories, resolveUploadUrl } from '../../services/articlesApi';
+import { LikeButton, CommentButton, ShareButton } from '../UI/ArticleActions';
 import './ArticlesListSection.css';
 
 const ARTICLES_PER_PAGE = 12;
@@ -243,6 +244,12 @@ function ArticlesListSection() {
                         Read Article
                       </Link>
                     </div>
+                  </div>
+
+                  <div className="article-item-actions">
+                    <LikeButton    articleId={article.id} />
+                    <CommentButton articleId={article.id} />
+                    <ShareButton   title={article.title} url={`${window.location.origin}/articles/${article.slug}`} />
                   </div>
 
                 </div>

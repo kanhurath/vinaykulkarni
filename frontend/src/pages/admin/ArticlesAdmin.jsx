@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import * as api from '../../services/articlesApi';
 import ArticleRichEditor from './ArticleRichEditor';
 import { SeoTab }          from './SeoTab';
@@ -640,10 +640,486 @@ function ArticlesListTab({ categories }) {
   );
 }
 
+// ── Likes Tab ─────────────────────────────────────────────────────────────────
+function LikesTab() {
+  const [articles,    setArticles]    = useState([]);
+  const [likesMap,    setLikesMap]    = useState({});
+  const [search,      setSearch]      = useState('');
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState('');
+  const [notDeployed, setNotDeployed] = useState(false);
+  const [setVals,     setSetVals]     = useState({});
+  const [addVals,     setAddVals]     = useState({});
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(''); setNotDeployed(false);
+    try {
+      const arts = await api.getAllArticles();
+      const rows = Array.isArray(arts) ? arts : (arts.articles || []);
+      setArticles(rows);
+      try {
+        const ldata = await api.getAdminLikes();
+        const map   = {};
+        (Array.isArray(ldata) ? ldata : []).forEach(r => { map[r.article_id] = r.count; });
+        setLikesMap(map);
+      } catch (e) {
+        if (e.message?.includes('404') || e.message?.includes('HTTP 404')) {
+          setNotDeployed(true);
+        }
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const applySet = async (id, val) => {
+    const n = Math.max(0, parseInt(val, 10) || 0);
+    try {
+      await api.setArticleLikeCount(id, n);
+      setLikesMap(m => ({ ...m, [id]: n }));
+    } catch (e) {
+      if (e.message?.includes('404') || e.message?.includes('HTTP 404')) {
+        setNotDeployed(true);
+      } else {
+        setError(e.message);
+      }
+    }
+  };
+
+  const applyAdd = async (id, val) => {
+    const delta   = Math.max(0, parseInt(val, 10) || 0);
+    const current = likesMap[id] || 0;
+    await applySet(id, current + delta);
+    setAddVals(v => ({ ...v, [id]: '' }));
+  };
+
+  const clear = async (id) => {
+    if (!confirm('Clear all likes for this article?')) return;
+    try {
+      await api.clearArticleLikes(id);
+      setLikesMap(m => ({ ...m, [id]: 0 }));
+    } catch (e) {
+      if (e.message?.includes('404') || e.message?.includes('HTTP 404')) {
+        setNotDeployed(true);
+      } else {
+        setError(e.message);
+      }
+    }
+  };
+
+  const filtered = articles.filter(a =>
+    !search || a.title?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="adm-section">
+      <h2 className="adm-section-title">Article Likes</h2>
+      {error && <p className="art-error-msg">{error}</p>}
+      {notDeployed && (
+        <div className="adm-deploy-banner">
+          <strong>⚠ Server update required.</strong>
+          <span>
+            The likes API is not yet deployed on the production server.
+            Upload the updated <code>articles.js</code> to the server and restart PM2 — see the guide below.
+          </span>
+          <a
+            className="adm-btn adm-btn-sm adm-btn-primary"
+            href="https://vinaykulkarni.com"
+            target="_blank"
+            rel="noreferrer"
+            style={{ textDecoration: 'none' }}
+          >
+            Open cPanel / SSH
+          </a>
+        </div>
+      )}
+      <div className="adm-likes-toolbar">
+        <input
+          className="adm-input"
+          type="search"
+          placeholder="Search articles…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ maxWidth: 300 }}
+        />
+        <button className="adm-btn" onClick={load}>Refresh</button>
+      </div>
+      {loading ? <p className="art-loading">Loading…</p> : (
+        <table className="adm-likes-table">
+          <thead>
+            <tr>
+              <th>Article</th>
+              <th className="adm-likes-count-col">Likes</th>
+              <th className="adm-likes-set-col">Set Count</th>
+              <th className="adm-likes-set-col">Add Likes</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(a => (
+              <tr key={a.id}>
+                <td className="adm-likes-title">{a.title}</td>
+                <td className="adm-likes-count-col adm-likes-count">{likesMap[a.id] || 0}</td>
+                <td className="adm-likes-set-col">
+                  <div className="adm-likes-inline">
+                    <input
+                      className="adm-input adm-likes-num-input"
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={setVals[a.id] ?? ''}
+                      onChange={e => setSetVals(v => ({ ...v, [a.id]: e.target.value }))}
+                    />
+                    <button
+                      className="adm-btn adm-btn-sm adm-btn-primary"
+                      onClick={() => applySet(a.id, setVals[a.id] ?? '')}
+                    >Set</button>
+                  </div>
+                </td>
+                <td className="adm-likes-set-col">
+                  <div className="adm-likes-inline">
+                    <input
+                      className="adm-input adm-likes-num-input"
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={addVals[a.id] ?? ''}
+                      onChange={e => setAddVals(v => ({ ...v, [a.id]: e.target.value }))}
+                    />
+                    <button
+                      className="adm-btn adm-btn-sm adm-btn-primary"
+                      onClick={() => applyAdd(a.id, addVals[a.id] ?? '')}
+                    >Add</button>
+                  </div>
+                </td>
+                <td>
+                  <button className="adm-btn adm-btn-sm adm-btn-danger" onClick={() => clear(a.id)}>
+                    Clear
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ── Comments Tab ──────────────────────────────────────────────────────────────
+function CommentsTab() {
+  const [comments,    setComments]    = useState([]);
+  const [articles,    setArticles]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState('');
+  const [notDeployed, setNotDeployed] = useState(false);
+  const [filterArt,   setFilterArt]   = useState('');
+  const [filterSt,    setFilterSt]    = useState('');
+  const [showForm,    setShowForm]    = useState(false);
+  const [form,        setForm]        = useState({ article_id: '', author_name: '', content: '', status: 'approved' });
+  const [imageFile,   setImageFile]   = useState(null);
+  const [saving,      setSaving]      = useState(false);
+  const fileRef = useRef(null);
+
+  const is404 = (e) => e.message?.includes('404') || e.message?.includes('HTTP 404');
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(''); setNotDeployed(false);
+    try {
+      const params = {};
+      if (filterArt) params.article_id = filterArt;
+      if (filterSt)  params.status     = filterSt;
+      const arts = await api.getAllArticles().catch(() => []);
+      const artArr = Array.isArray(arts) ? arts : (arts.articles || []);
+      setArticles(artArr);
+      try {
+        const rows = await api.getAdminComments(params);
+        setComments(Array.isArray(rows) ? rows : []);
+      } catch (e) {
+        if (is404(e)) { setNotDeployed(true); setComments([]); }
+        else throw e;
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterArt, filterSt]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const [editingId,   setEditingId]   = useState(null);
+  const [editForm,    setEditForm]    = useState({});
+  const [editImage,   setEditImage]   = useState(null);
+  const [editSaving,  setEditSaving]  = useState(false);
+  const editFileRef = useRef(null);
+
+  const startEdit = (c) => {
+    setEditingId(c.id);
+    setEditForm({ author_name: c.author_name || '', content: c.content || '', status: c.status || 'approved' });
+    setEditImage(null);
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditImage(null); };
+
+  const saveEdit = async (c) => {
+    if (!editForm.content?.trim() && !editImage) return setError('Please enter comment text or upload an image.');
+    setEditSaving(true); setError('');
+    try {
+      const fd = new FormData();
+      fd.append('author_name', editForm.author_name || '');
+      fd.append('content',     editForm.content);
+      fd.append('status',      editForm.status);
+      if (editImage) fd.append('image', editImage);
+      await api.updateComment(c.id, fd);
+      setEditingId(null); setEditImage(null);
+      load();
+    } catch (e) {
+      is404(e) ? setNotDeployed(true) : setError(e.message);
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const approve = async (id) => {
+    try { await api.approveComment(id); load(); }
+    catch (e) { is404(e) ? setNotDeployed(true) : setError(e.message); }
+  };
+
+  const del = async (id) => {
+    if (!confirm('Delete this comment?')) return;
+    try { await api.deleteComment(id); load(); }
+    catch (e) { is404(e) ? setNotDeployed(true) : setError(e.message); }
+  };
+
+  const submitForm = async (e) => {
+    e.preventDefault();
+    if (!form.article_id) return setError('Please select an article.');
+    if (!form.content.trim() && !imageFile) return setError('Please enter comment text or upload an image.');
+    setSaving(true); setError('');
+    try {
+      const fd = new FormData();
+      Object.entries(form).forEach(([k, v]) => fd.append(k, v));
+      if (imageFile) fd.append('image', imageFile);
+      await api.adminAddComment(fd);
+      setForm({ article_id: '', author_name: '', content: '', status: 'approved' });
+      setImageFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+      setShowForm(false);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="adm-section">
+      <div className="art-list-header">
+        <h2 className="adm-section-title">Comments</h2>
+        <button className="adm-btn adm-btn-primary" onClick={() => setShowForm(s => !s)}>
+          {showForm ? 'Cancel' : '+ Add Comment'}
+        </button>
+      </div>
+
+      {error && <p className="art-error-msg">{error}</p>}
+      {notDeployed && (
+        <div className="adm-deploy-banner">
+          <strong>⚠ Server update required.</strong>
+          <span>The comments API is not yet deployed on the production server. Upload the updated <code>articles.js</code> and restart PM2 — see the guide below.</span>
+        </div>
+      )}
+
+      {showForm && (
+        <form className="adm-comment-form" onSubmit={submitForm}>
+          <div className="art-form-grid">
+            <div className="adm-field">
+              <label className="adm-label">Article <span className="art-required">*</span></label>
+              <select
+                className="adm-input"
+                value={form.article_id}
+                onChange={e => setForm(f => ({ ...f, article_id: e.target.value }))}
+                required
+              >
+                <option value="">— select article —</option>
+                {articles.map(a => (
+                  <option key={a.id} value={a.id}>{a.title}</option>
+                ))}
+              </select>
+            </div>
+            <div className="adm-field">
+              <label className="adm-label">Author Name</label>
+              <input className="adm-input" value={form.author_name}
+                onChange={e => setForm(f => ({ ...f, author_name: e.target.value }))}
+                placeholder="Admin" />
+            </div>
+          </div>
+          <div className="adm-field">
+            <label className="adm-label">Comment <span className="art-required">*</span></label>
+            <textarea className="adm-input adm-textarea" rows={4} value={form.content}
+              onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+              placeholder="Comment text… (required if no image)" />
+          </div>
+          <div className="art-form-grid">
+            <div className="adm-field">
+              <label className="adm-label">Status</label>
+              <select className="adm-input" value={form.status}
+                onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+                <option value="approved">Approved</option>
+                <option value="pending">Pending</option>
+              </select>
+            </div>
+            <div className="adm-field">
+              <label className="adm-label">Image (optional)</label>
+              <input ref={fileRef} type="file" accept="image/*" className="adm-input"
+                onChange={e => setImageFile(e.target.files[0] || null)} />
+            </div>
+          </div>
+          <div className="adm-save-bar">
+            <button className="adm-btn adm-btn-primary" type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Add Comment'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="adm-likes-toolbar">
+        <select className="adm-input" style={{ maxWidth: 220 }} value={filterArt}
+          onChange={e => setFilterArt(e.target.value)}>
+          <option value="">All Articles</option>
+          {articles.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+        </select>
+        <select className="adm-input" style={{ maxWidth: 160 }} value={filterSt}
+          onChange={e => setFilterSt(e.target.value)}>
+          <option value="">All Statuses</option>
+          <option value="approved">Approved</option>
+          <option value="pending">Pending</option>
+        </select>
+        <button className="adm-btn" onClick={load}>Refresh</button>
+      </div>
+
+      {loading ? <p className="art-loading">Loading…</p> : (
+        comments.length === 0
+          ? <p className="art-empty">No comments found.</p>
+          : comments.map(c => (
+            <div key={c.id} className={`adm-comment-row${editingId === c.id ? ' editing' : ''}`}>
+              {/* ── View mode ── */}
+              {editingId !== c.id && (<>
+                <div className="adm-comment-meta">
+                  <strong>{c.author_name || 'Anonymous'}</strong>
+                  <span className={`art-status ${c.status}`}>{c.status}</span>
+                  <span className="adm-comment-article">{c.article_title || `Article #${c.article_id}`}</span>
+                  <span style={{ color: '#a09080', fontSize: '0.78rem' }}>
+                    {c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN') : ''}
+                  </span>
+                </div>
+                {c.image_url && (
+                  <img src={c.image_url} alt="" className="adm-comment-img" />
+                )}
+                <p className="adm-comment-text">{c.content}</p>
+                <div className="adm-comment-actions">
+                  {c.status === 'pending' && (
+                    <button className="adm-btn adm-btn-sm adm-btn-primary" onClick={() => approve(c.id)}>
+                      Approve
+                    </button>
+                  )}
+                  <button className="adm-btn adm-btn-sm" onClick={() => startEdit(c)}>
+                    Edit
+                  </button>
+                  <button className="adm-btn adm-btn-sm adm-btn-danger" onClick={() => del(c.id)}>
+                    Delete
+                  </button>
+                </div>
+              </>)}
+
+              {/* ── Edit mode ── */}
+              {editingId === c.id && (
+                <div className="adm-comment-edit-form">
+                  <div className="adm-comment-edit-header">
+                    <span className="adm-comment-edit-title">Editing comment</span>
+                    <span className="adm-comment-article">{c.article_title || `Article #${c.article_id}`}</span>
+                  </div>
+                  <div className="art-form-grid">
+                    <div className="adm-field">
+                      <label className="adm-label">Author Name</label>
+                      <input
+                        className="adm-input"
+                        value={editForm.author_name}
+                        onChange={e => setEditForm(f => ({ ...f, author_name: e.target.value }))}
+                        placeholder="Anonymous"
+                      />
+                    </div>
+                    <div className="adm-field">
+                      <label className="adm-label">Status</label>
+                      <select
+                        className="adm-input"
+                        value={editForm.status}
+                        onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))}
+                      >
+                        <option value="approved">Approved</option>
+                        <option value="pending">Pending</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="adm-field">
+                    <label className="adm-label">Comment <span className="art-required">*</span></label>
+                    <textarea
+                      className="adm-input adm-textarea"
+                      rows={4}
+                      value={editForm.content}
+                      onChange={e => setEditForm(f => ({ ...f, content: e.target.value }))}
+                    />
+                  </div>
+                  <div className="adm-field">
+                    <label className="adm-label">
+                      Replace Image <span style={{ fontWeight: 400, color: '#a09080' }}>(leave blank to keep existing)</span>
+                    </label>
+                    {c.image_url && !editImage && (
+                      <img src={c.image_url} alt="" className="adm-comment-img" style={{ marginBottom: '0.4rem' }} />
+                    )}
+                    {editImage && (
+                      <img src={URL.createObjectURL(editImage)} alt="preview" className="adm-comment-img" style={{ marginBottom: '0.4rem' }} />
+                    )}
+                    <input
+                      ref={editFileRef}
+                      type="file"
+                      accept="image/*"
+                      className="adm-input"
+                      onChange={e => setEditImage(e.target.files[0] || null)}
+                    />
+                  </div>
+                  <div className="adm-comment-edit-actions">
+                    <button
+                      className="adm-btn adm-btn-primary"
+                      onClick={() => saveEdit(c)}
+                      disabled={editSaving || (!editForm.content?.trim() && !editImage && !c.image_url)}
+                    >
+                      {editSaving ? 'Saving…' : 'Save Changes'}
+                    </button>
+                    <button className="adm-btn" onClick={cancelEdit} disabled={editSaving}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 const PAGE_TABS = [
   { id: 'articles',   label: 'Articles'   },
   { id: 'categories', label: 'Categories' },
+  { id: 'likes',      label: 'Likes'      },
+  { id: 'comments',   label: 'Comments'   },
   { id: 'seo',        label: 'SEO'        },
   { id: 'blocks',     label: 'Blocks'     },
   { id: 'order',      label: 'Section Order' },
@@ -689,6 +1165,8 @@ function ArticlesAdmin() {
       <div className="bio-adm-content">
         {active === 'articles'   && <ArticlesListTab categories={categories} />}
         {active === 'categories' && <CategoriesTab />}
+        {active === 'likes'      && <LikesTab />}
+        {active === 'comments'   && <CommentsTab />}
         {active === 'seo'        && <SeoTab pageSlug="articles" />}
         {active === 'blocks'     && <SiteBlocksTab page="articles" />}
         {active === 'order'      && <SectionOrderTab page="articles" />}

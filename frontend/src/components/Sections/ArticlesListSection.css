@@ -638,3 +638,5 @@
   color: #8b1a1a;
   letter-spacing: 0.03em;
 }
+
+.article-item-actions { margin-top: 0.75rem; padding-top: 0.65rem; border-top: 1px solid #ede5d8; }

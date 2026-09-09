@@ -4,6 +4,7 @@ import { useReveal } from '../hooks/useReveal';
 import { PageSeo } from '../components/PageSeo';
 import InnerPageHero from '../components/Sections/InnerPageHero';
 import { getArticle, resolveUploadUrl } from '../services/articlesApi';
+import { ArticleActions } from '../components/UI/ArticleActions';
 import './ArticleSinglePage.css';
 
 const SITE_URL = (import.meta.env.VITE_SERVER_URL || 'https://vinaykulkarni.com').replace(/\/$/, '');
@@ -125,6 +126,13 @@ function ArticleSinglePage() {
         <article
           className="article-body"
           dangerouslySetInnerHTML={{ __html: article.content }}
+        />
+
+        {/* ── Like / Comment / Share ── */}
+        <ArticleActions
+          articleId={article.id}
+          title={article.title}
+          url={`${SITE_URL}/articles/${article.slug}`}
         />
 
         {/* ── Tags ── */}

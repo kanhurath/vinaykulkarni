@@ -387,3 +387,130 @@
   .art-toolbar { flex-direction: column; align-items: stretch; }
   .art-search-wrap { min-width: unset; }
 }
+
+/* ── Likes Tab ─────────────────────────────────────────────────────────────── */
+.adm-likes-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.adm-likes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.adm-likes-table th,
+.adm-likes-table td {
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid #ede5d8;
+  text-align: left;
+  vertical-align: middle;
+}
+.adm-likes-table th {
+  background: #f7f3ef;
+  font-family: 'Josefin Sans', sans-serif;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a7560;
+}
+.adm-likes-title { max-width: 260px; }
+.adm-likes-count-col { width: 80px; text-align: center; }
+.adm-likes-count { font-weight: 700; font-size: 1rem; color: #d4670a; text-align: center; }
+.adm-likes-set-col { width: 160px; }
+.adm-likes-inline { display: flex; gap: 0.4rem; align-items: center; }
+.adm-likes-num-input { width: 70px; text-align: center; }
+
+/* ── Comments Tab ──────────────────────────────────────────────────────────── */
+.adm-comment-form {
+  background: #f7f3ef;
+  border: 1px solid #ede5d8;
+  border-radius: 0.5rem;
+  padding: 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.adm-comment-row {
+  border: 1px solid #ede5d8;
+  border-radius: 0.5rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.7rem;
+  background: #fffdf9;
+}
+.adm-comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+  font-size: 0.82rem;
+}
+.adm-comment-article { color: #8a7560; font-size: 0.78rem; }
+.adm-comment-img {
+  max-height: 140px;
+  border-radius: 0.4rem;
+  margin-bottom: 0.5rem;
+  display: block;
+}
+.adm-comment-text {
+  font-size: 0.9rem;
+  color: #3a2c1a;
+  margin: 0.3rem 0 0.6rem;
+  white-space: pre-wrap;
+}
+.adm-comment-actions { display: flex; gap: 0.5rem; }
+
+/* ── Deploy Banner ─────────────────────────────────────────────────────────── */
+.adm-deploy-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  background: #fff8ec;
+  border: 1.5px solid #f0b942;
+  border-radius: 0.5rem;
+  padding: 0.9rem 1.1rem;
+  margin-bottom: 1.2rem;
+  font-size: 0.88rem;
+  color: #7a5500;
+  line-height: 1.5;
+}
+.adm-deploy-banner strong { color: #b07000; }
+.adm-deploy-banner code {
+  background: #fdefc5;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.82rem;
+}
+
+/* ── Comment inline edit ───────────────────────────────────────────────────── */
+.adm-comment-row.editing {
+  border-color: #d4670a;
+  background: #fffaf5;
+}
+.adm-comment-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.adm-comment-edit-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+}
+.adm-comment-edit-title {
+  font-family: 'Josefin Sans', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #d4670a;
+}
+.adm-comment-edit-actions {
+  display: flex;
+  gap: 0.6rem;
+  padding-top: 0.25rem;
+}
