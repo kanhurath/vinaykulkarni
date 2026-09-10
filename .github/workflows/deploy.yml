@@ -98,11 +98,12 @@ jobs:
       - name: Release
         run: |
           ssh "$SSH_TARGET" DP="$DP" APP="$PM2_APP" SITE_URL="$SITE_URL" 'bash -s' <<'EOF'
-          set -uo pipefail
+          set -euo pipefail
           cd "$DP/server"
 
           rollback() {
             echo "::error::ROLLBACK — $1"
+            cd /tmp  # avoid uv_cwd crash when $DP/server is deleted below
             [ -d "$DP/.rollback/server" ] && { rm -rf "$DP/server"; mv "$DP/.rollback/server" "$DP/server"; }
             [ -d "$DP/.rollback/assets" ] && { rm -rf "$DP/assets"; mv "$DP/.rollback/assets" "$DP/assets"; }
             [ -f "$DP/.rollback/index.html" ] && cp -p "$DP/.rollback/index.html" "$DP/index.html"
@@ -126,10 +127,15 @@ jobs:
             pm2 start index.js --name "$APP" --cwd "$DP/server" || rollback "pm2 start failed"
           fi
 
-          sleep 5
-          api=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/health)
-          page=$(curl -s -o /tmp/vk_home.html -w '%{http_code}' "$SITE_URL/")
-          echo "health: api=$api page=$page"
+          # retry page health up to 12 times (60 s total) to allow nginx/node to warm up
+          api="000"; page="000"
+          for i in $(seq 1 12); do
+            sleep 5
+            api=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/health)
+            page=$(curl -s -o /tmp/vk_home.html -w '%{http_code}' "$SITE_URL/")
+            echo "health check $i/12: api=$api page=$page"
+            [ "$api" = "200" ] && [ "$page" = "200" ] && break
+          done
           [ "$api" = "200" ]  || rollback "API health $api"
           [ "$page" = "200" ] || rollback "page health $page"
           grep -q 'id="root"'                /tmp/vk_home.html || rollback "home page missing SPA root"
