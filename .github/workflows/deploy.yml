@@ -51,7 +51,29 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
 
-      
+      # Create required directories on server before syncing
+      - name: Create directories on server
+        run: |
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "mkdir -p '${{ secrets.DEPLOY_PATH }}/server'"
+
+      # Stop the running app BEFORE syncing files, so nothing is reading from
+      # server/ while it's being overwritten/deleted. This is what was causing
+      # the crash/clash during deploy.
+      - name: Stop app before file sync
+        run: |
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "pm2 stop vinaykulkarni-api || true"
+
+      # Sync backend source (exclude node_modules, .env, uploads)
+      - name: Deploy backend (server/)
+        run: |
+          rsync -az --delete \
+            --exclude='node_modules/' \
+            --exclude='.env' \
+            --exclude='public/uploads/' \
+            server/ \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/server/"
 
       # Built SPA lands directly in public_html; excludes protect server-side paths
       # that live under the same root from --delete.
@@ -65,8 +87,8 @@ jobs:
             frontend/dist/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
 
-      # ── Post-deploy: install deps & restart PM2 ────────────────────────────────
-      - name: Install backend dependencies & restart PM2
+      # ── Post-deploy: install deps & start PM2 fresh ────────────────────────────
+      - name: Install backend dependencies & start PM2
         run: |
           ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'ENDSSH'
             set -e
@@ -75,13 +97,14 @@ jobs:
             # Install production dependencies only
             npm ci --omit=dev --prefer-offline
 
-            # Restart via PM2 if the process exists, otherwise start it
+            # Process was stopped before the sync, so start it clean here.
+            # Using delete + start (instead of reload) avoids stale process
+            # state pointing at old code/deps.
             if pm2 describe vinaykulkarni-api > /dev/null 2>&1; then
-              pm2 reload vinaykulkarni-api --update-env
-            else
-              pm2 start index.js --name vinaykulkarni-api
-              pm2 save
+              pm2 delete vinaykulkarni-api
             fi
+            pm2 start index.js --name vinaykulkarni-api
+            pm2 save
           ENDSSH
 
       - name: Deployment complete
