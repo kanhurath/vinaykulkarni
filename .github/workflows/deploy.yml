@@ -4,16 +4,15 @@ on:
   push:
     branches:
       - master
-  pull_request:
-    types:
-      - closed
-    branches:
-      - master
+  workflow_dispatch:
+
+# A merged PR already produces a push to master, so only push is used here.
+concurrency:
+  group: deploy-bigrock
+  cancel-in-progress: false
 
 jobs:
   deploy:
-    # For PRs, only run when actually merged (not just closed/rejected)
-    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -55,7 +54,8 @@ jobs:
       # Create required directories on server before syncing
       - name: Create directories on server
         run: |
-          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "mkdir -p ${{ secrets.DEPLOY_PATH }}/server && mkdir -p ${{ secrets.DEPLOY_PATH }}/frontend/dist"
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "mkdir -p '${{ secrets.DEPLOY_PATH }}/server'"
 
       # Sync backend source (exclude node_modules, .env, uploads)
       - name: Deploy backend (server/)
@@ -65,24 +65,29 @@ jobs:
             --exclude='.env' \
             --exclude='public/uploads/' \
             server/ \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/server/
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/server/"
 
-      # Sync built frontend assets
-      - name: Deploy frontend build (frontend/dist/)
+      # Built SPA lands directly in public_html; excludes protect server-side paths
+      # that live under the same root from --delete.
+      - name: Deploy frontend build to public_html root
         run: |
           rsync -az --delete \
+            --exclude='server/' \
+            --exclude='.htaccess' \
+            --exclude='cgi-bin/' \
+            --exclude='.well-known/' \
             frontend/dist/ \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/frontend/dist/
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
 
       # ── Post-deploy: install deps & restart PM2 ────────────────────────────────
       - name: Install backend dependencies & restart PM2
         run: |
           ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'ENDSSH'
             set -e
-            cd ${{ secrets.DEPLOY_PATH }}/server
+            cd "${{ secrets.DEPLOY_PATH }}/server"
 
             # Install production dependencies only
-            npm install --omit=dev --prefer-offline
+            npm ci --omit=dev --prefer-offline
 
             # Restart via PM2 if the process exists, otherwise start it
             if pm2 describe vinaykulkarni-api > /dev/null 2>&1; then
