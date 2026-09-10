@@ -43,7 +43,7 @@ function Footer() {
           </li>
         ))}
       </ul>
-      <div className="footer-copy">© 2026 Vinay Kulkarni · All Rights Reserved</div>
+      <div className="footer-copy">© 2026 vinaykulkarni.com · All Rights Reserved</div>
     </footer>
   );
 }
