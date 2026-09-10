@@ -10,17 +10,23 @@ concurrency:
   group: deploy-bigrock
   cancel-in-progress: false
 
+env:
+  SSH_TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+  # DEPLOY_PATH secret MUST be the web root:
+  #   /home/vinayroot/web/vinaykulkarni.com/public_html
+  DP: ${{ secrets.DEPLOY_PATH }}
+  PM2_APP: vk-cms-server
+  SITE_URL: https://vinaykulkarni.com
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      # ── Checkout ───────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Node.js setup ──────────────────────────────────────────────────────────
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -28,18 +34,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      # ── Build frontend ─────────────────────────────────────────────────────────
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci --prefer-offline
-
       - name: Build frontend (Vite)
         working-directory: frontend
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-        run: npm run build
+        run: |
+          npm ci --prefer-offline --no-audit --no-fund
+          npm run build
+          test -f dist/index.html
+          test -d dist/assets
+          test "$(find dist/assets -type f | wc -l)" -gt 0
 
-      # ── SSH setup ──────────────────────────────────────────────────────────────
       - name: Set up SSH agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -48,102 +53,91 @@ jobs:
       - name: Add server to known hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Ensure server directory exists
+      - name: Snapshot current release
         run: |
-          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "mkdir -p '${{ secrets.DEPLOY_PATH }}/server'"
+          ssh "$SSH_TARGET" DP="$DP" 'bash -s' <<'EOF'
+          set -euo pipefail
+          mkdir -p "$DP/server"
+          rm -rf "$DP/.rollback"; mkdir -p "$DP/.rollback"
+          [ -d "$DP/server" ]     && cp -al "$DP/server"     "$DP/.rollback/server"     || true
+          [ -d "$DP/assets" ]     && cp -al "$DP/assets"     "$DP/.rollback/assets"     || true
+          [ -f "$DP/index.html" ] && cp -p  "$DP/index.html" "$DP/.rollback/index.html" || true
+          echo "snapshot done"
+          EOF
 
-      # Stop the app before any files change, so nothing is reading from
-      # server/ mid-sync. || true so a first-ever deploy (process doesn't
-      # exist yet) doesn't fail the job.
-      - name: Stop app before file sync
+      - name: Sync backend (server/)
         run: |
-          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "pm2 stop vk-cms-server || true"
-
-      # ── Sync backend ───────────────────────────────────────────────────────────
-      # .env is gitignored and always excluded here — it is never sourced from
-      # the repo or overwritten by deploy. See "Write .env" step below for how
-      # it's kept correct instead.
-      - name: Deploy backend (server/)
-        run: |
-          rsync -az --delete \
+          rsync -rlptz --delete --no-owner --no-group \
             --exclude='node_modules/' \
             --exclude='.env' \
             --exclude='public/uploads/' \
-            server/ \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/server/"
+            --exclude='.git/' \
+            server/ "$SSH_TARGET:$DP/server/"
 
-      # ── Sync frontend ──────────────────────────────────────────────────────────
-      # Built SPA lands directly in public_html; excludes protect server-side
-      # paths that live under the same root from --delete.
-      - name: Deploy frontend build to public_html root
+      - name: Sync frontend build
         run: |
-          rsync -az --delete \
-            --exclude='server/' \
-            --exclude='server/.env' \
-            --exclude='blog/' \
-            --exclude='.htaccess' \
-            --exclude='cgi-bin/' \
-            --exclude='.well-known/' \
-            frontend/dist/ \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+          rsync -rlptz --delete --no-owner --no-group \
+            frontend/dist/assets/ "$SSH_TARGET:$DP/assets/"
+          rsync -rlptz --no-owner --no-group \
+            --exclude='assets/' \
+            frontend/dist/ "$SSH_TARGET:$DP/"
 
-      # ── .env ───────────────────────────────────────────────────────────────────
-      # Written from a GitHub secret on every deploy so it can never be left
-      # missing/stale. Store the full file contents (DB_HOST, DB_USER, DB_PASS,
-      # DB_NAME, PORT=3001, SITE_URL, JWT_SECRET, ADMIN_USER, ADMIN_PASS) in the
-      # repo secret SERVER_ENV_FILE. Skips cleanly if that secret isn't set yet,
-      # so this won't break your first run before you add it.
       - name: Write server .env from secret
         env:
           SERVER_ENV_FILE: ${{ secrets.SERVER_ENV_FILE }}
         run: |
-          if [ -z "$SERVER_ENV_FILE" ]; then
-            echo "SERVER_ENV_FILE secret not set — skipping, existing .env on server is left as-is."
+          if [ -z "${SERVER_ENV_FILE:-}" ]; then
+            echo "SERVER_ENV_FILE not set — leaving existing server/.env untouched."
             exit 0
           fi
-          echo "$SERVER_ENV_FILE" | ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cat > '${{ secrets.DEPLOY_PATH }}/server/.env'"
+          printf '%s\n' "$SERVER_ENV_FILE" | \
+            ssh "$SSH_TARGET" "umask 027 && cat > '$DP/server/.env'"
 
-      # ── Ownership/permissions ────────────────────────────────────────────────
-      # Explicitly NOT chowning here. Do not add a chown step — a prior deploy
-      # chowning to hestiamail:hestiaweb broke Hestia File Manager write access.
-      # public_html should stay vinayroot:www-data 755; fix that manually on the
-      # server if it ever drifts, not from this workflow.
-
-      # ── Post-deploy: install deps & restart PM2 ────────────────────────────────
-      - name: Install backend dependencies & restart PM2
+      - name: Release
         run: |
-          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'ENDSSH'
-            set -e
-            cd "${{ secrets.DEPLOY_PATH }}/server"
+          ssh "$SSH_TARGET" DP="$DP" APP="$PM2_APP" SITE_URL="$SITE_URL" 'bash -s' <<'EOF'
+          set -uo pipefail
+          cd "$DP/server"
 
-            npm ci --omit=dev --prefer-offline
+          rollback() {
+            echo "::error::ROLLBACK — $1"
+            [ -d "$DP/.rollback/server" ] && { rm -rf "$DP/server"; mv "$DP/.rollback/server" "$DP/server"; }
+            [ -d "$DP/.rollback/assets" ] && { rm -rf "$DP/assets"; mv "$DP/.rollback/assets" "$DP/assets"; }
+            [ -f "$DP/.rollback/index.html" ] && cp -p "$DP/.rollback/index.html" "$DP/index.html"
+            chown -R vinayroot:vinayroot "$DP/server" "$DP/assets" "$DP/index.html" 2>/dev/null || true
+            pm2 restart "$APP" --update-env 2>/dev/null \
+              || pm2 start "$DP/server/index.js" --name "$APP" --cwd "$DP/server"
+            pm2 save; rm -rf "$DP/.rollback"; exit 1
+          }
 
-            if pm2 describe vk-cms-server > /dev/null 2>&1; then
-              pm2 restart vk-cms-server --update-env
-            else
-              pm2 start index.js --name vk-cms-server --cwd "${{ secrets.DEPLOY_PATH }}/server"
-            fi
-            pm2 save
-          ENDSSH
+          npm ci --omit=dev --prefer-offline --no-audit --no-fund || rollback "npm ci failed"
+          node --check index.js          || rollback "index.js syntax error"
+          node --check seoHtmlBuilder.js || rollback "seoHtmlBuilder.js syntax error"
 
-      # ── Health check ─────────────────────────────────────────────────────────
-      # Fails the job (and leaves a clear signal in the Actions log) if the
-      # site isn't actually serving 200 after restart, instead of silently
-      # reporting success while the backend crash-loops.
-      - name: Health check
-        run: |
-          sleep 5
-          status=$(curl -s -o /dev/null -w "%{http_code}" https://vinaykulkarni.com/api/health)
-          echo "Health check returned HTTP $status"
-          if [ "$status" != "200" ]; then
-            echo "::error::Health check failed with status $status — deployment did not come up cleanly."
-            exit 1
+          chown vinayroot:www-data "$DP"; chmod 755 "$DP"
+          find "$DP" -maxdepth 1 -mindepth 1 ! -name blog ! -name '.rollback' \
+            -exec chown -R vinayroot:vinayroot {} +
+
+          if pm2 describe "$APP" >/dev/null 2>&1; then
+            pm2 restart "$APP" --update-env || rollback "pm2 restart failed"
+          else
+            pm2 start index.js --name "$APP" --cwd "$DP/server" || rollback "pm2 start failed"
           fi
 
-      - name: Deployment complete
-        run: echo "Deployed successfully to ${{ secrets.SSH_HOST }}"
+          sleep 5
+          api=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/health)
+          page=$(curl -s -o /tmp/vk_home.html -w '%{http_code}' "$SITE_URL/")
+          echo "health: api=$api page=$page"
+          [ "$api" = "200" ]  || rollback "API health $api"
+          [ "$page" = "200" ] || rollback "page health $page"
+          grep -q 'id="root"'                /tmp/vk_home.html || rollback "home page missing SPA root"
+          grep -qE '/assets/index-[^"]+\.js' /tmp/vk_home.html || rollback "home page missing JS bundle"
+
+          pm2 save; rm -rf "$DP/.rollback"
+          echo "deploy OK (api=$api page=$page)"
+          EOF
+
+      - name: Done
+        run: echo "Deployed to ${{ secrets.SSH_HOST }}"
