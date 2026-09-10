@@ -23,7 +23,9 @@
   cursor: pointer;
   transition: border-color 0.18s, background 0.18s, color 0.18s;
   white-space: nowrap;
+  margin-right:10px;
 }
+
 
 .art-action-btn:hover {
   border-color: #d4670a;
