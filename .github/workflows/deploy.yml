@@ -6,7 +6,6 @@ on:
       - master
   workflow_dispatch:
 
-# A merged PR already produces a push to master, so only push is used here.
 concurrency:
   group: deploy-bigrock
   cancel-in-progress: false
@@ -40,7 +39,7 @@ jobs:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: npm run build
 
-      # ── Deploy via SSH ─────────────────────────────────────────────────────────
+      # ── SSH setup ──────────────────────────────────────────────────────────────
       - name: Set up SSH agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -51,21 +50,23 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
 
-      # Create required directories on server before syncing
-      - name: Create directories on server
+      - name: Ensure server directory exists
         run: |
           ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "mkdir -p '${{ secrets.DEPLOY_PATH }}/server'"
 
-      # Stop the running app BEFORE syncing files, so nothing is reading from
-      # server/ while it's being overwritten/deleted. This is what was causing
-      # the crash/clash during deploy.
+      # Stop the app before any files change, so nothing is reading from
+      # server/ mid-sync. || true so a first-ever deploy (process doesn't
+      # exist yet) doesn't fail the job.
       - name: Stop app before file sync
         run: |
           ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "pm2 stop vk-cms-server || true"
 
-      # Sync backend source (exclude node_modules, .env, uploads)
+      # ── Sync backend ───────────────────────────────────────────────────────────
+      # .env is gitignored and always excluded here — it is never sourced from
+      # the repo or overwritten by deploy. See "Write .env" step below for how
+      # it's kept correct instead.
       - name: Deploy backend (server/)
         run: |
           rsync -az --delete \
@@ -75,8 +76,9 @@ jobs:
             server/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/server/"
 
-      # Built SPA lands directly in public_html; excludes protect server-side paths
-      # that live under the same root from --delete.
+      # ── Sync frontend ──────────────────────────────────────────────────────────
+      # Built SPA lands directly in public_html; excludes protect server-side
+      # paths that live under the same root from --delete.
       - name: Deploy frontend build to public_html root
         run: |
           rsync -az --delete \
@@ -87,25 +89,59 @@ jobs:
             frontend/dist/ \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
 
-      # ── Post-deploy: install deps & start PM2 fresh ────────────────────────────
-      - name: Install backend dependencies & start PM2
+      # ── .env ───────────────────────────────────────────────────────────────────
+      # Written from a GitHub secret on every deploy so it can never be left
+      # missing/stale. Store the full file contents (DB_HOST, DB_USER, DB_PASS,
+      # DB_NAME, PORT=3001, SITE_URL, JWT_SECRET, ADMIN_USER, ADMIN_PASS) in the
+      # repo secret SERVER_ENV_FILE. Skips cleanly if that secret isn't set yet,
+      # so this won't break your first run before you add it.
+      - name: Write server .env from secret
+        env:
+          SERVER_ENV_FILE: ${{ secrets.SERVER_ENV_FILE }}
+        run: |
+          if [ -z "$SERVER_ENV_FILE" ]; then
+            echo "SERVER_ENV_FILE secret not set — skipping, existing .env on server is left as-is."
+            exit 0
+          fi
+          echo "$SERVER_ENV_FILE" | ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cat > '${{ secrets.DEPLOY_PATH }}/server/.env'"
+
+      # ── Ownership/permissions ────────────────────────────────────────────────
+      # Explicitly NOT chowning here. Do not add a chown step — a prior deploy
+      # chowning to hestiamail:hestiaweb broke Hestia File Manager write access.
+      # public_html should stay vinayroot:www-data 755; fix that manually on the
+      # server if it ever drifts, not from this workflow.
+
+      # ── Post-deploy: install deps & restart PM2 ────────────────────────────────
+      - name: Install backend dependencies & restart PM2
         run: |
           ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'ENDSSH'
             set -e
             cd "${{ secrets.DEPLOY_PATH }}/server"
 
-            # Install production dependencies only
             npm ci --omit=dev --prefer-offline
 
-            # Process was stopped before the sync, so start it clean here.
-            # Using delete + start (instead of reload) avoids stale process
-            # state pointing at old code/deps.
             if pm2 describe vk-cms-server > /dev/null 2>&1; then
-              pm2 delete vk-cms-server
+              pm2 restart vk-cms-server --update-env
+            else
+              pm2 start index.js --name vk-cms-server --cwd "${{ secrets.DEPLOY_PATH }}/server"
             fi
-            pm2 start index.js --name vk-cms-server
             pm2 save
           ENDSSH
+
+      # ── Health check ─────────────────────────────────────────────────────────
+      # Fails the job (and leaves a clear signal in the Actions log) if the
+      # site isn't actually serving 200 after restart, instead of silently
+      # reporting success while the backend crash-loops.
+      - name: Health check
+        run: |
+          sleep 5
+          status=$(curl -s -o /dev/null -w "%{http_code}" https://vinaykulkarni.com/api/health)
+          echo "Health check returned HTTP $status"
+          if [ "$status" != "200" ]; then
+            echo "::error::Health check failed with status $status — deployment did not come up cleanly."
+            exit 1
+          fi
 
       - name: Deployment complete
         run: echo "Deployed successfully to ${{ secrets.SSH_HOST }}"
