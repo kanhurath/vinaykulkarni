@@ -1,0 +1,88 @@
+name: Deploy to BigRock
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# A merged PR already produces a push to master, so only push is used here.
+concurrency:
+  group: deploy-bigrock
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── Checkout ───────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Node.js setup ──────────────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # ── Build frontend ─────────────────────────────────────────────────────────
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline
+
+      - name: Build frontend (Vite)
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: npm run build
+
+      # ── Deploy via SSH ─────────────────────────────────────────────────────────
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      
+
+      # Built SPA lands directly in public_html; excludes protect server-side paths
+      # that live under the same root from --delete.
+      - name: Deploy frontend build to public_html root
+        run: |
+          rsync -az --delete \
+            --exclude='server/' \
+            --exclude='.htaccess' \
+            --exclude='cgi-bin/' \
+            --exclude='.well-known/' \
+            frontend/dist/ \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+
+      # ── Post-deploy: install deps & restart PM2 ────────────────────────────────
+      - name: Install backend dependencies & restart PM2
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'ENDSSH'
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}/server"
+
+            # Install production dependencies only
+            npm ci --omit=dev --prefer-offline
+
+            # Restart via PM2 if the process exists, otherwise start it
+            if pm2 describe vinaykulkarni-api > /dev/null 2>&1; then
+              pm2 reload vinaykulkarni-api --update-env
+            else
+              pm2 start index.js --name vinaykulkarni-api
+              pm2 save
+            fi
+          ENDSSH
+
+      - name: Deployment complete
+        run: echo "Deployed successfully to ${{ secrets.SSH_HOST }}"
