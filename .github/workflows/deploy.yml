@@ -63,7 +63,7 @@ jobs:
       - name: Stop app before file sync
         run: |
           ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "pm2 stop vinaykulkarni-api || true"
+            "pm2 stop vk-cms-server || true"
 
       # Sync backend source (exclude node_modules, .env, uploads)
       - name: Deploy backend (server/)
@@ -100,10 +100,10 @@ jobs:
             # Process was stopped before the sync, so start it clean here.
             # Using delete + start (instead of reload) avoids stale process
             # state pointing at old code/deps.
-            if pm2 describe vinaykulkarni-api > /dev/null 2>&1; then
-              pm2 delete vinaykulkarni-api
+            if pm2 describe vk-cms-server > /dev/null 2>&1; then
+              pm2 delete vk-cms-server
             fi
-            pm2 start index.js --name vinaykulkarni-api
+            pm2 start index.js --name vk-cms-server
             pm2 save
           ENDSSH
 
