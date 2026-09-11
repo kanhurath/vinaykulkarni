@@ -219,11 +219,12 @@ function loadGoogleFont(fontName) {
 // ── Customizer settings ───────────────────────────────────────────────────────
 
 export function applyCustomizerSettings({
-  typography = {},
-  colors     = {},
-  container  = {},
-  buttons    = {},
+  typography    = {},
+  colors        = {},
+  container     = {},
+  buttons       = {},
   'site-protection': protection = {},
+  'global-css': globalCss = {},
 }) {
   // ── Content protection — each toggle is fully independent ───────────────────
   if (protection.frontendProtection) _initFrontendProtection();
@@ -307,6 +308,15 @@ export function applyCustomizerSettings({
     document.head.appendChild(styleEl);
   }
   styleEl.textContent = css;
+
+  // ── Global custom CSS ────────────────────────────────────────────────────────
+  let customCssEl = document.getElementById('gc-custom-css');
+  if (!customCssEl) {
+    customCssEl = document.createElement('style');
+    customCssEl.id = 'gc-custom-css';
+    document.head.appendChild(customCssEl);
+  }
+  customCssEl.textContent = globalCss.css || '';
 }
 
 export function useGlobalCustomizer() {

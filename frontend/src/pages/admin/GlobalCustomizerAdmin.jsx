@@ -803,6 +803,58 @@ function SecurityTab() {
   );
 }
 
+// ── Global CSS Tab ────────────────────────────────────────────────────────────
+
+const DEF_GLOBAL_CSS = { css: '' };
+
+function GlobalCSSTab() {
+  const [form,   setForm]   = useState(DEF_GLOBAL_CSS);
+  const [saving, setSaving] = useState(false);
+  const [saved,  setSaved]  = useState(false);
+
+  useEffect(() => {
+    api.getCustomizerSection('global-css')
+      .then(d => setForm({ ...DEF_GLOBAL_CSS, ...d }))
+      .catch(() => {});
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.saveCustomizerSection('global-css', form);
+      applyCustomizerSettings({ 'global-css': form });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (_) {}
+    setSaving(false);
+  };
+
+  return (
+    <div className="gc-tab-body">
+      <div className="gc-section">
+        <span className="gc-section-label">Custom CSS</span>
+        <p className="gc-hint">
+          Write or paste CSS here. This stylesheet is injected last — after all other styles — so
+          it overrides anything on the site. Changes are applied globally and immediately upon saving.
+        </p>
+        <textarea
+          className="gc-css-editor"
+          spellCheck={false}
+          value={form.css}
+          onChange={e => setForm(f => ({ ...f, css: e.target.value }))}
+          placeholder={`/* Example */\n.hero-title {\n  letter-spacing: 0.05em;\n}`}
+        />
+        {form.css.trim() && (
+          <p className="gc-hint gc-hint--warn">
+            Custom CSS runs with full specificity. Test carefully — invalid rules may break the layout.
+          </p>
+        )}
+      </div>
+      <SaveBar onSave={save} saving={saving} saved={saved} />
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -811,6 +863,7 @@ const TABS = [
   { id: 'container',  label: 'Container' },
   { id: 'buttons',    label: 'Buttons' },
   { id: 'security',   label: 'Security' },
+  { id: 'global-css', label: 'Global CSS' },
 ];
 
 function GlobalCustomizerAdmin() {
@@ -846,6 +899,7 @@ function GlobalCustomizerAdmin() {
         {active === 'container'  && <ContainerTab />}
         {active === 'buttons'    && <ButtonsTab />}
         {active === 'security'   && <SecurityTab />}
+        {active === 'global-css' && <GlobalCSSTab />}
       </div>
     </div>
   );
