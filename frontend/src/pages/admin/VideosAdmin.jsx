@@ -166,8 +166,10 @@ function VideosTab() {
   };
 
   const handleThumbUpload = async (id, file) => {
-    const { thumb_url } = await api.uploadThumb(id, file);
-    setVideos(vs => vs.map(v => v.id === id ? { ...v, thumb_url } : v));
+    const res = await api.uploadThumb(id, file);
+    const thumb_url = res?.thumb_url;
+    if (thumb_url) setVideos(vs => vs.map(v => v.id === id ? { ...v, thumb_url } : v));
+    return thumb_url;
   };
 
   const del = async (id) => {
@@ -304,8 +306,8 @@ function VideoEditBlock({ video, onSave, onCancel, onThumbUpload, onChange }) {
     const file = e.target.files?.[0]; if (!file) return;
     setUploading(true);
     try {
-      const { thumb_url } = await onThumbUpload(video.id, file);
-      setForm(f => ({ ...f, thumb_url }));
+      const thumb_url = await onThumbUpload(video.id, file);
+      if (thumb_url) setForm(f => ({ ...f, thumb_url }));
     } finally { setUploading(false); }
   };
 
