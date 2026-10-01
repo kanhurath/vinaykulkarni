@@ -149,11 +149,20 @@ router.get('/', async (req, res) => {
       params.push(category);
     }
 
+    // MySQL full-text search silently drops purely-numeric tokens and any term
+    // shorter than innodb_ft_min_token_size (default 3).  Use LIKE for those
+    // cases so numeric/alphanumeric/short queries always return results.
+    const useLike = search && (/\d/.test(search) || search.length < 3);
+
     if (search) {
-      // Use FULLTEXT MATCH for speed and relevance; fall back to LIKE on title
-      // if the FULLTEXT index isn't ready yet (e.g. first boot).
-      where += ' AND MATCH(a.title, a.excerpt, a.tags) AGAINST (? IN BOOLEAN MODE)';
-      params.push(search);
+      if (useLike) {
+        const like = `%${search}%`;
+        where += ' AND (a.title LIKE ? OR a.excerpt LIKE ? OR a.tags LIKE ?)';
+        params.push(like, like, like);
+      } else {
+        where += ' AND MATCH(a.title, a.excerpt, a.tags) AGAINST (? IN BOOLEAN MODE)';
+        params.push(search);
+      }
     }
 
     const [[{ total }]] = await db.execute(
@@ -165,13 +174,13 @@ router.get('/', async (req, res) => {
     // LIMIT / OFFSET must be interpolated as safe integers — mysql2 prepared
     // statement binding treats them as strings in some versions, causing
     // "Incorrect arguments to mysqld_stmt_execute".
-    const orderBy = search
+    const orderBy = (search && !useLike)
       ? `ORDER BY
            MATCH(a.title) AGAINST (? IN BOOLEAN MODE) DESC,
            a.is_featured DESC, a.pub_date DESC, a.sort_order, a.id DESC`
       : `ORDER BY a.is_featured DESC, a.pub_date DESC, a.sort_order, a.id DESC`;
 
-    const rowParams = search ? [...params, search] : params;
+    const rowParams = (search && !useLike) ? [...params, search] : params;
 
     const [rows] = await db.execute(
       `SELECT a.* FROM articles a ${where} ${orderBy} LIMIT ${per_page} OFFSET ${offset}`,

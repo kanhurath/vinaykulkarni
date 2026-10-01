@@ -225,7 +225,25 @@ export function applyCustomizerSettings({
   buttons       = {},
   'site-protection': protection = {},
   'global-css': globalCss = {},
+  redirect      = {},
 }) {
+  // ── Redirect ────────────────────────────────────────────────────────────────
+  if (!_isAdminRoute()) {
+    // Support both new { rules: [] } and old { enabled, sourcePath, destinationUrl } formats
+    const rules = Array.isArray(redirect.rules)
+      ? redirect.rules
+      : (redirect.sourcePath ? [{ enabled: !!redirect.enabled, sourcePath: redirect.sourcePath, destinationUrl: redirect.destinationUrl }] : []);
+
+    const current = window.location.pathname;
+    for (const rule of rules) {
+      if (!rule.enabled || !rule.sourcePath || !rule.destinationUrl) continue;
+      const src = rule.sourcePath.trim();
+      const match = current === src || current === src.replace(/\/$/, '') || current + '/' === src;
+      if (match) {
+        try { new URL(rule.destinationUrl); window.location.replace(rule.destinationUrl); return; } catch (_) {}
+      }
+    }
+  }
   // ── Content protection — each toggle is fully independent ───────────────────
   if (protection.frontendProtection) _initFrontendProtection();
   else                               _teardownFrontendProtection();

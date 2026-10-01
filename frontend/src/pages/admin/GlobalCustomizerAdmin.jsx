@@ -160,6 +160,8 @@ const DEF_COLORS      = { accent:'#d4670a', links:'#d4670a', headings:'#1a1208',
 const DEF_CONTAINER   = { layout:'standard', style:'unboxed', containerWidth:1200, narrowWidth:750 };
 const DEF_BUTTONS     = { textColor:'#ffffff', bgColor:'#d4670a', borderColor:'transparent', font:'Josefin Sans', paddingTop:'12', paddingRight:'28', paddingBottom:'12', paddingLeft:'28', paddingUnit:'px', borderWidthTop:'0', borderWidthRight:'0', borderWidthBottom:'0', borderWidthLeft:'0', borderRadiusTop:'3', borderRadiusRight:'3', borderRadiusBottom:'3', borderRadiusLeft:'3', borderRadiusUnit:'px' };
 const DEF_PROTECTION  = { frontendProtection: false, adminProtection: false };
+const DEF_REDIRECT      = { rules: [] };
+const DEF_REDIRECT_FORM = { enabled: true, sourcePath: '', destinationUrl: '' };
 
 // ── Shared tiny components ────────────────────────────────────────────────────
 
@@ -855,6 +857,242 @@ function GlobalCSSTab() {
   );
 }
 
+// ── REDIRECT TAB ─────────────────────────────────────────────────────────────
+
+function isValidUrl(url) {
+  if (!url) return false;
+  try { new URL(url); return true; } catch { return false; }
+}
+
+function migrateRedirect(d) {
+  // Migrate old single-rule format { enabled, sourcePath, destinationUrl } → { rules: [...] }
+  if (Array.isArray(d?.rules)) return d;
+  if (d?.sourcePath || d?.destinationUrl) {
+    return { rules: [{ id: Date.now(), enabled: !!d.enabled, sourcePath: d.sourcePath || '', destinationUrl: d.destinationUrl || '' }] };
+  }
+  return DEF_REDIRECT;
+}
+
+function RedirectTab() {
+  const [rules,      setRules]     = useState([]);
+  const [search,     setSearch]    = useState('');
+  const [showForm,   setShowForm]  = useState(false);
+  const [editingId,  setEditingId] = useState(null);
+  const [form,       setForm]      = useState(DEF_REDIRECT_FORM);
+  const [formErr,    setFormErr]   = useState('');
+  const [saving,     setSaving]    = useState(false);
+  const [saved,      setSaved]     = useState(false);
+
+  const load = () => {
+    api.getCustomizerSection('redirect')
+      .then(d => setRules(migrateRedirect(d).rules))
+      .catch(() => {});
+  };
+  useEffect(load, []);
+
+  const persistRules = async (nextRules) => {
+    setSaving(true);
+    try {
+      await api.saveCustomizerSection('redirect', { rules: nextRules });
+      setRules(nextRules);
+      setSaved(true); setTimeout(() => setSaved(false), 3000);
+    } catch (_) {}
+    setSaving(false);
+  };
+
+  const openAdd = () => {
+    setEditingId(null);
+    setForm(DEF_REDIRECT_FORM);
+    setFormErr('');
+    setShowForm(true);
+  };
+
+  const openEdit = (rule) => {
+    setEditingId(rule.id);
+    setForm({ enabled: rule.enabled, sourcePath: rule.sourcePath, destinationUrl: rule.destinationUrl });
+    setFormErr('');
+    setShowForm(true);
+    setTimeout(() => document.getElementById('rd-form-src')?.focus(), 50);
+  };
+
+  const cancelForm = () => { setShowForm(false); setEditingId(null); setFormErr(''); };
+
+  const submitForm = async () => {
+    if (!form.sourcePath.trim()) { setFormErr('Source path is required.'); return; }
+    if (!isValidUrl(form.destinationUrl.trim())) { setFormErr('Destination must be a valid URL (e.g. https://example.com/page).'); return; }
+    const rule = { ...form, sourcePath: form.sourcePath.trim(), destinationUrl: form.destinationUrl.trim() };
+    let next;
+    if (editingId !== null) {
+      next = rules.map(r => r.id === editingId ? { ...r, ...rule } : r);
+    } else {
+      next = [...rules, { id: Date.now(), ...rule }];
+    }
+    await persistRules(next);
+    setShowForm(false); setEditingId(null);
+  };
+
+  const deleteRule = async (id) => {
+    if (!confirm('Delete this redirect?')) return;
+    await persistRules(rules.filter(r => r.id !== id));
+  };
+
+  const toggleEnabled = async (id) => {
+    await persistRules(rules.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
+  };
+
+  const q = search.toLowerCase().trim();
+  const filtered = q
+    ? rules.filter(r => r.sourcePath.toLowerCase().includes(q) || r.destinationUrl.toLowerCase().includes(q))
+    : rules;
+
+  return (
+    <div className="gc-tab-body">
+      {/* Header */}
+      <div className="gc-section gc-section--first">
+        <div className="gc-section-head">
+          <span className="gc-section-label">Redirect URL Rules</span>
+          {!showForm && (
+            <button className="adm-btn adm-btn-primary adm-btn-sm" onClick={openAdd}>+ Add Redirect</button>
+          )}
+        </div>
+        <p className="gc-hint">
+          Each enabled rule sends visitors from a <strong>Source Path</strong> on this site to a
+          <strong> Destination URL</strong>. Rules are checked in order; the first match fires.
+          The admin panel is never redirected.
+        </p>
+      </div>
+
+      {/* Add / Edit Form */}
+      {showForm && (
+        <div className="gc-redirect-form">
+          <div className="gc-redirect-form-head">
+            <span className="gc-section-label">{editingId !== null ? 'Edit Redirect' : 'New Redirect'}</span>
+            <button className="gc-icon-btn" onClick={cancelForm} title="Cancel">✕</button>
+          </div>
+
+          <div className="gc-redirect-form-body">
+            <div className="gc-redirect-form-row">
+              <div className="gc-redirect-form-field">
+                <label className="gc-redirect-form-label">Source Path</label>
+                <input
+                  id="rd-form-src"
+                  className="adm-input"
+                  type="text"
+                  placeholder="/old-page"
+                  value={form.sourcePath}
+                  onChange={e => { setForm(f => ({ ...f, sourcePath: e.target.value })); setFormErr(''); }}
+                />
+              </div>
+              <div className="gc-redirect-form-field">
+                <label className="gc-redirect-form-label">Destination URL</label>
+                <input
+                  className="adm-input"
+                  type="url"
+                  placeholder="https://example.com/new-page"
+                  value={form.destinationUrl}
+                  onChange={e => { setForm(f => ({ ...f, destinationUrl: e.target.value })); setFormErr(''); }}
+                />
+              </div>
+            </div>
+
+            <div className="gc-redirect-form-status-row">
+              <div className="gc-protection-status" data-active={String(form.enabled)}>
+                <span className="gc-protection-dot" />
+                <span className="gc-protection-status-text">{form.enabled ? 'Active' : 'Disabled'}</span>
+              </div>
+              <div className="gc-toggle-row">
+                <button className={`gc-toggle-btn${form.enabled ? ' active' : ''}`}  onClick={() => setForm(f => ({ ...f, enabled: true }))}>Enable</button>
+                <button className={`gc-toggle-btn${!form.enabled ? ' active' : ''}`} onClick={() => setForm(f => ({ ...f, enabled: false }))}>Disable</button>
+              </div>
+            </div>
+
+            {formErr && <p className="gc-hint gc-hint--warn">{formErr}</p>}
+
+            <div className="gc-redirect-form-actions">
+              <button className="adm-btn adm-btn-primary" onClick={submitForm} disabled={saving}>
+                {saving ? 'Saving…' : editingId !== null ? 'Update Redirect' : 'Add Redirect'}
+              </button>
+              <button className="adm-btn" onClick={cancelForm}>Cancel</button>
+              {saved && <span className="gc-saved-msg">✓ Saved</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search */}
+      {rules.length > 0 && (
+        <div className="gc-redirect-search-wrap">
+          <input
+            className="adm-input gc-redirect-search"
+            type="search"
+            placeholder="Search by source path or destination URL…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search && (
+            <button className="gc-icon-btn gc-redirect-search-clear" onClick={() => setSearch('')} title="Clear">✕</button>
+          )}
+        </div>
+      )}
+
+      {/* List */}
+      <div className="gc-redirect-list-wrap">
+        {rules.length === 0 ? (
+          <div className="gc-redirect-empty">
+            No redirect rules yet. Click <strong>+ Add Redirect</strong> to create one.
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="gc-redirect-empty">No rules match your search.</div>
+        ) : (
+          <table className="gc-redirect-table">
+            <thead>
+              <tr>
+                <th className="gc-rt-col-status">Status</th>
+                <th className="gc-rt-col-src">Source Path</th>
+                <th className="gc-rt-col-dest">Destination URL</th>
+                <th className="gc-rt-col-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((rule) => (
+                <tr key={rule.id} className={rule.enabled ? '' : 'gc-rt-row--disabled'}>
+                  <td className="gc-rt-col-status">
+                    <button
+                      className={`gc-rt-status-badge${rule.enabled ? ' active' : ''}`}
+                      onClick={() => toggleEnabled(rule.id)}
+                      title={rule.enabled ? 'Click to disable' : 'Click to enable'}
+                    >
+                      <span className="gc-protection-dot" />
+                      {rule.enabled ? 'Active' : 'Off'}
+                    </button>
+                  </td>
+                  <td className="gc-rt-col-src">
+                    <code className="gc-rt-code">{rule.sourcePath}</code>
+                  </td>
+                  <td className="gc-rt-col-dest">
+                    <span className="gc-rt-dest" title={rule.destinationUrl}>{rule.destinationUrl}</span>
+                  </td>
+                  <td className="gc-rt-col-actions">
+                    <div className="gc-rt-actions">
+                      <button className="adm-btn adm-btn-sm" onClick={() => openEdit(rule)}>Edit</button>
+                      <button className="adm-btn adm-btn-danger adm-btn-sm" onClick={() => deleteRule(rule.id)}>Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!showForm && rules.length > 0 && (
+          <div className="gc-save-bar" style={{ marginTop: '0.75rem' }}>
+            {saved && <span className="gc-saved-msg">✓ Saved</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -863,6 +1101,7 @@ const TABS = [
   { id: 'container',  label: 'Container' },
   { id: 'buttons',    label: 'Buttons' },
   { id: 'security',   label: 'Security' },
+  { id: 'redirect',   label: 'Redirect' },
   { id: 'global-css', label: 'Global CSS' },
 ];
 
@@ -899,6 +1138,7 @@ function GlobalCustomizerAdmin() {
         {active === 'container'  && <ContainerTab />}
         {active === 'buttons'    && <ButtonsTab />}
         {active === 'security'   && <SecurityTab />}
+        {active === 'redirect'   && <RedirectTab />}
         {active === 'global-css' && <GlobalCSSTab />}
       </div>
     </div>

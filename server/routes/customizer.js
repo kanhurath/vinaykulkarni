@@ -4,7 +4,7 @@ const { verifyToken } = require('../middleware/verifyToken');
 
 const router = express.Router();
 
-const SECTIONS = ['typography', 'colors', 'container', 'buttons', 'site-protection', 'global-css'];
+const SECTIONS = ['typography', 'colors', 'container', 'buttons', 'site-protection', 'global-css', 'redirect'];
 
 const DEFAULTS = {
   typography: {
@@ -39,6 +39,9 @@ const DEFAULTS = {
   },
   'global-css': {
     css: '',
+  },
+  redirect: {
+    rules: [],
   },
   buttons: {
     textColor: '#ffffff',
